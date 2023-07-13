@@ -66,3 +66,18 @@ def setCategory(df, ignore=[]):
             cdf[field_name] = cdf[field_name].astype('category')
 
     return cdf
+
+def clearStopwords(nouns, stopwords_file_path="wordcloud/stopwords-ko.txt"):
+    with open(stopwords_file_path, 'r', encoding='utf-8') as f:
+        stopwords = f.readlines()
+        
+        for i, v in enumerate(stopwords):
+            stopwords[i] = v.strip()
+
+    data_set = []
+
+    for v in nouns:
+        if v not in stopwords:
+            data_set.append(v)
+
+    return data_set
