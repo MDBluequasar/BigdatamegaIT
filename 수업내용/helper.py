@@ -4,7 +4,12 @@ from sklearn.impute import SimpleImputer
 from scipy import stats
 from scipy.stats import t
 from math import sqrt
-
+from pandas import read_excel, melt
+from scipy.stats import shapiro, normaltest, ks_2samp, bartlett, fligner, levene, f_oneway, chi2_contingency
+from statsmodels.formula.api import ols
+from statsmodels.stats.anova import anova_lm
+import sys
+import os
 
 def getIq(field):
     q1 = field.quantile(q=0.25)
@@ -97,3 +102,18 @@ def get_confidence_interval(data, clevel=0.95):
     cmin, cmax = t.interval(clevel, dof, loc=sample_mean, scale=sample_std_error)
     
     return (cmin, cmax)
+
+def equal_variance_test(*any):   # '*' = 별이 한개면 여러 파라미터를 사용할 수 있다
+                                 # '**' =  별이 두개면 파라미터에 이름값이 있을 때 dictionary로 만들 수 있다
+    # statistic=1.333315753388535, pvalue=0.2633161881599037
+    s1, p1 = bartlett(*any)
+    s2, p2 = fligner(*any)
+    s3, p3 = levene(*any)
+
+    df = DataFrame({
+        'statistic': [s1, s2, s3],
+        'p-value': [p1, p2, p3],
+        'equal-var': [p1 > 0.05, p2 > 0.05, p3 > 0.05]
+    }, index=['Bartlett', 'Fligner', 'Levene'])
+
+    return df
