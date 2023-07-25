@@ -36,7 +36,7 @@ for i in range(7):
 
 
 for p in range(7,15): #아래 조각 완성
-    for q in range(p-1,15):
+    for q in range(p,15):
       pizza[p][q] = 0
       # print(p)
 
