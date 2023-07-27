@@ -1,5 +1,5 @@
 import numpy as np
-from pandas import DataFrame, MultiIndex, concat
+from pandas import DataFrame, MultiIndex, concat, merge
 from math import sqrt
 from scipy.stats import t, pearsonr, spearmanr
 from sklearn.impute import SimpleImputer
@@ -7,8 +7,22 @@ from scipy.stats import shapiro, normaltest, ks_2samp, bartlett, fligner, levene
 from statsmodels.formula.api import ols
 import re
 from statsmodels.stats.outliers_influence import variance_inflation_factor
+from sklearn.preprocessing import StandardScaler
+from pca import pca
+
 
 def getIq(field):
+    """
+    IQR(Interquartile Range)를 이용한 이상치 경계값 계산
+
+    Parameters
+    ------- 
+    - field: 데이터 프레임의 필드
+
+    Returns
+    -------
+    - 결측치경계: 이상치 경계값 리스트
+    """
     q1 = field.quantile(q=0.25)
     q3 = field.quantile(q=0.75)
     iqr = q3 - q1
@@ -17,10 +31,23 @@ def getIq(field):
     결측치경계 = [하한, 상한]
     return 결측치경계
 
-def replaceOutlier(df, fieldName):
-    cdf = df.copy()  # 리스트는 얇은 복사가 되기 때문에 깊은 복사로 바꿔주는 copy를 써서 원본은 보존한다.
 
-    # fieldName[]이 List 가 아니면 List로 변환
+def replaceOutlier(df, fieldName):
+    """
+    이상치를 판별하여 결측치로 치환
+
+    Parameters
+    -------
+    - df: 데이터 프레임
+    - fieldName: 이상치를 판별할 필드명
+
+    Returns
+    -------
+    - cdf : 결측치를 이상치로 치환한 데이터 프레임
+    """
+    cdf = df.copy()
+
+    # fieldName이 List가 아니면 List로 변환
     if not isinstance(fieldName, list):
         fieldName = [fieldName]
 
@@ -31,13 +58,39 @@ def replaceOutlier(df, fieldName):
 
     return cdf
 
-def replaceMissingValue(df):
-    imr = SimpleImputer(missing_values = np.nan, strategy = 'mean')
+
+def replaceMissingValue(df, strategy='mean'):
+    """
+    결측치 정제
+
+    Parameters
+    -------
+    - df: 데이터 프레임
+    - strategy: 결측치 대체 전략(mean, median, most_frequent). 기본값은 mean
+
+    Returns
+    -------
+    - re_df: 정제된 데이터 프레임
+    """
+    imr = SimpleImputer(missing_values=np.nan, strategy=strategy)
     df_imr = imr.fit_transform(df.values)
-    re_df = DataFrame(df_imr, index = df.index, columns = df.columns)
+    re_df = DataFrame(df_imr, index=df.index, columns=df.columns)
     return re_df
 
-def setCategory(df, ignore=[]):
+
+def setCategory(df, fields=[]):
+    """
+    데이터 프레임에서 지정된 필드를 범주형으로 변경한다.
+
+    Parameters
+    -------
+    - df: 데이터 프레임
+    - fields: 범주형으로 변경할 필드명 리스트. 기본값은 빈 리스트(전체 필드 대상)
+
+    Returns
+    -------
+    - cdf: 범주형으로 변경된 데이터 프레임
+    """
     cdf = df.copy()
     # 데이터 프레임의 변수명을 리스트로 변환
     ilist = list(cdf.dtypes.index)
@@ -51,32 +104,41 @@ def setCategory(df, ignore=[]):
             # 변수명을 가져온다.
             field_name = ilist[i]
 
-            # 제외목록이 있고, 해당 변수명이 제외목록에 포함되어 있으면 다음 변수로 이동
-            if ignore and field_name in ignore:
+            # 대상 필드 목록이 설정되지 않거나(전체필드 대상), 현재 필드가 대상 필드목록에 포함되어 있지 않다면?
+            if not fields or field_name not in fields:
                 continue
 
             # 가져온 변수명에 대해 값의 종류별로 빈도를 카운트 한 후 인덱스 이름순으로 정렬
             vc = cdf[field_name].value_counts().sort_index()
-            #print(vc)
+            # print(vc)
 
             # 인덱스 이름순으로 정렬된 값의 종류별로 반복 처리
             for ii, vv in enumerate(list(vc.index)):
-                # 일련번호값 생성
-                vnum = ii + 1
-                #print(vv, " -->", vnum)
-
                 # 일련번호값으로 치환
-                cdf.loc[cdf[field_name] == vv, field_name] = vnum
+                cdf.loc[cdf[field_name] == vv, field_name] = ii
 
             # 해당 변수의 데이터 타입을 범주형으로 변환
             cdf[field_name] = cdf[field_name].astype('category')
 
     return cdf
 
+
 def clearStopwords(nouns, stopwords_file_path="wordcloud/stopwords-ko.txt"):
+    """
+    불용어를 제거한다.
+
+    Parameters
+    -------
+    - nouns: 명사 리스트
+    - stopwords_file_path: 불용어 파일 경로. 기본값은 wordcloud/stopwords-ko.txt
+
+    Returns
+    -------
+    - data_set: 불용어가 제거된 명사 리스트
+    """
     with open(stopwords_file_path, 'r', encoding='utf-8') as f:
         stopwords = f.readlines()
-        
+
         for i, v in enumerate(stopwords):
             stopwords[i] = v.strip()
 
@@ -88,23 +150,53 @@ def clearStopwords(nouns, stopwords_file_path="wordcloud/stopwords-ko.txt"):
 
     return data_set
 
+
 def get_confidence_interval(data, clevel=0.95):
+    """
+    신뢰구간 계산
+
+    Parameters
+    -------
+    - data: 데이터
+    - clevel: 신뢰수준. 기본값은 0.95
+
+    Returns
+    -------
+    - cmin: 신뢰구간 하한
+    - cmax: 신뢰구간 상한
+    """
     n = len(data)                           # 샘플 사이즈
     dof = n - 1                             # 자유도
     sample_mean = data.mean()               # 표본 평균
     sample_std = data.std(ddof=1)           # 표본 표준 편차
-    sample_std_error = sample_std / sqrt(n) # 표본 표준오차
+    sample_std_error = sample_std / sqrt(n)  # 표본 표준오차
 
     # 신뢰구간
-    cmin, cmax = t.interval(clevel, dof, loc=sample_mean, scale=sample_std_error)
-    
+    cmin, cmax = t.interval(
+        clevel, dof, loc=sample_mean, scale=sample_std_error)
+
     return (cmin, cmax)
 
+
 def normality_test(*any):
+    """
+    분산분석을 수행하기 위한 정규성을 검정 한다.
+
+    Parameters
+    -------
+    - any: 필드들
+
+    Returns
+    -------
+    - df: 검정 결과 데이터 프레임
+    """
     names = []
 
-    result = {'statistic' : [], 'p-value' : [], 'result' : []}
-
+    result = {
+        'statistic': [],
+        'p-value': [],
+        'result': []
+    }
     for i in any:
         s, p = shapiro(i)
         result['statistic'].append(s)
@@ -130,12 +222,21 @@ def normality_test(*any):
         result['result'].append(p > 0.05)
         names.append(('정규성', 'ks_2samp', f'{any[i].name} vs {any[j].name}'))
 
-    return DataFrame(result, index= MultiIndex.from_tuples(names, names =['condition', 'test', 'field']))
+    return DataFrame(result, index=MultiIndex.from_tuples(names, names=['condition', 'test', 'field']))
 
-def equal_variance_test(*any):  # '*' = 별이 한개면 여러 파라미터를 사용할 수 있다
-                                 # '**' =  별이 두개면 파라미터에 이름값이 있을 때 dictionary로 만들 수 있다
-   
-    # statistic=1.333315753388535, pvalue=0.2633161881599037
+
+def equal_variance_test(*any):
+    """
+    분산분석을 수행하기 위한 등분산성을 검정 한다.
+
+    Parameters
+    -------
+    - any: 필드들
+
+    Returns
+    -------
+    - df: 검정 결과 데이터 프레임
+    """
     s1, p1 = bartlett(*any)
     s2, p2 = fligner(*any)
     s3, p3 = levene(*any)
@@ -147,7 +248,8 @@ def equal_variance_test(*any):  # '*' = 별이 한개면 여러 파라미터를 
 
     fix = " vs "
     name = fix.join(names)
-    index = [['등분산성', 'Bartlett', name], ['등분산성', 'Fligner', name], ['등분산성', 'Levene', name]]
+    index = [['등분산성', 'Bartlett', name], [
+        '등분산성', 'Fligner', name], ['등분산성', 'Levene', name]]
 
     df = DataFrame({
         'statistic': [s1, s2, s3],
@@ -157,7 +259,19 @@ def equal_variance_test(*any):  # '*' = 별이 한개면 여러 파라미터를 
 
     return df
 
+
 def independence_test(*any):
+    """
+    분산분석을 수행하기 위한 독립성을 검정한다.
+
+    Parameters
+    -------
+    - any: 필드들
+
+    Returns
+    -------
+    - df: 검정 결과 데이터 프레임
+    """
     df = DataFrame(any).T
     result = chi2_contingency(df)
 
@@ -175,14 +289,38 @@ def independence_test(*any):
         'statistic': [result.statistic],
         'p-value': [result.pvalue],
         'result': [result.pvalue > 0.05]
-    }, index = MultiIndex.from_tuples(index, names = ['condition', 'test', 'field']))
+    }, index=MultiIndex.from_tuples(index, names=['condition', 'test', 'field']))
 
     return df
 
+
 def all_test(*any):
+    """
+    정규성, 등분산성, 독립성을 모두 검정한다.
+
+    Parameters
+    -------
+    - any: 필드들
+
+    Returns
+    -------
+    - df: 검정 결과 데이터 프레임
+    """
     return concat([normality_test(*any), equal_variance_test(*any), independence_test(*any)])
 
+
 def pearson_r(df):
+    """
+    피어슨 상관계수를 사용하여 상관분석을 수행한다.
+
+    Parameters
+    -------
+    - df: 데이터 프레임
+
+    Returns
+    -------
+    - rdf: 상관분석 결과 데이터 프레임
+    """
     names = df.columns
     n = len(names)
     pv = 0.05
@@ -197,14 +335,27 @@ def pearson_r(df):
         s, p = pearsonr(df[names[i]], df[names[j]])
         result = p < pv
 
-        data.append({'fields': fields, 'statistic': s, 'pvalue': p, 'result': result})
+        data.append({'fields': fields, 'statistic': s,
+                    'pvalue': p, 'result': result})
 
     rdf = DataFrame(data)
     rdf.set_index('fields', inplace=True)
-    
+
     return rdf
 
+
 def spearman_r(df):
+    """
+    스피어만 상관계수를 사용하여 상관분석을 수행한다.
+
+    Parameters
+    -------
+    - df: 데이터 프레임
+
+    Returns
+    -------
+    - rdf: 상관분석 결과 데이터 프레임
+    """
     names = df.columns
     n = len(names)
     pv = 0.05
@@ -219,11 +370,12 @@ def spearman_r(df):
         s, p = spearmanr(df[names[i]], df[names[j]])
         result = p < pv
 
-        data.append({'fields': fields, 'statistic': s, 'pvalue': p, 'result': result})
+        data.append({'fields': fields, 'statistic': s,
+                    'pvalue': p, 'result': result})
 
     rdf = DataFrame(data)
     rdf.set_index('fields', inplace=True)
-    
+
     return rdf
 
 def ext_ols(data, y, x):
@@ -273,7 +425,7 @@ def ext_ols(data, y, x):
     # 두 번째 표의 내용을 딕셔너리로 분해하여 my에 추가
     my['variables'] = []
     name_list = list(data.columns)
-    print(name_list)
+    #print(name_list)
 
     for i, v in enumerate(summary.tables[1].data):
         if i == 0:
@@ -344,8 +496,10 @@ def ext_ols(data, y, x):
 
         varstr.append(k)
 
-    # 리턴
+    # 리턴할
     return (model, fit, summary, table, result, goodness, varstr)
+
+
 
 class OlsResult:
     def __init__(self):
@@ -448,3 +602,37 @@ def my_ols(data, y, x):
     ols_result.varstr = varstr
 
     return ols_result
+
+def scalling(df, yname):
+    """
+    데이터 프레임을 표준화 한다.
+
+    Parameters
+    -------
+    - df: 데이터 프레임
+    - yname: 종속변수 이름
+
+    Returns
+    -------
+    - x_train_std_df: 표준화된 독립변수 데이터 프레임
+    - y_train_std_df: 표준화된 종속변수 데이터 프레임
+    """
+    x_train = df.drop([yname], axis=1)
+    x_train_std = StandardScaler().fit_transform(x_train)
+    x_train_std_df = DataFrame(x_train_std, columns=x_train.columns)
+    
+    y_train = df.filter([yname])
+    y_train_std = StandardScaler().fit_transform(y_train)
+    y_train_std_df = DataFrame(y_train_std, columns=y_train.columns)
+
+    return (x_train_std_df, y_train_std_df)
+
+def get_best_features(x_train_std_df):
+    pca_model = pca()
+    fit = pca_model.fit_transform(x_train_std_df)
+    topfeat_df = fit['topfeat']
+    
+    best = topfeat_df.query("type=='best'")
+    feature = list(set(list(best['feature'])))
+    
+    return (feature, topfeat_df)
