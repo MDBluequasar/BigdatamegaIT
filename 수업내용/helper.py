@@ -9,6 +9,8 @@ import re
 from statsmodels.stats.outliers_influence import variance_inflation_factor
 from sklearn.preprocessing import StandardScaler
 from pca import pca
+from statsmodels.formula.api import logit
+from sklearn.metrics import confusion_matrix, roc_curve, roc_auc_score, accuracy_score, recall_score, precision_score, f1_score
 
 
 def getIq(field):
@@ -30,7 +32,6 @@ def getIq(field):
     상한 = q3 + 1.5 * iqr
     결측치경계 = [하한, 상한]
     return 결측치경계
-
 
 def replaceOutlier(df, fieldName):
     """
@@ -58,7 +59,6 @@ def replaceOutlier(df, fieldName):
 
     return cdf
 
-
 def replaceMissingValue(df, strategy='mean'):
     """
     결측치 정제
@@ -76,7 +76,6 @@ def replaceMissingValue(df, strategy='mean'):
     df_imr = imr.fit_transform(df.values)
     re_df = DataFrame(df_imr, index=df.index, columns=df.columns)
     return re_df
-
 
 def setCategory(df, fields=[]):
     """
@@ -122,7 +121,6 @@ def setCategory(df, fields=[]):
 
     return cdf
 
-
 def clearStopwords(nouns, stopwords_file_path="wordcloud/stopwords-ko.txt"):
     """
     불용어를 제거한다.
@@ -150,7 +148,6 @@ def clearStopwords(nouns, stopwords_file_path="wordcloud/stopwords-ko.txt"):
 
     return data_set
 
-
 def get_confidence_interval(data, clevel=0.95):
     """
     신뢰구간 계산
@@ -176,7 +173,6 @@ def get_confidence_interval(data, clevel=0.95):
         clevel, dof, loc=sample_mean, scale=sample_std_error)
 
     return (cmin, cmax)
-
 
 def normality_test(*any):
     """
@@ -224,7 +220,6 @@ def normality_test(*any):
 
     return DataFrame(result, index=MultiIndex.from_tuples(names, names=['condition', 'test', 'field']))
 
-
 def equal_variance_test(*any):
     """
     분산분석을 수행하기 위한 등분산성을 검정 한다.
@@ -259,7 +254,6 @@ def equal_variance_test(*any):
 
     return df
 
-
 def independence_test(*any):
     """
     분산분석을 수행하기 위한 독립성을 검정한다.
@@ -293,7 +287,6 @@ def independence_test(*any):
 
     return df
 
-
 def all_test(*any):
     """
     정규성, 등분산성, 독립성을 모두 검정한다.
@@ -307,7 +300,6 @@ def all_test(*any):
     - df: 검정 결과 데이터 프레임
     """
     return concat([normality_test(*any), equal_variance_test(*any), independence_test(*any)])
-
 
 def pearson_r(df):
     """
@@ -342,7 +334,6 @@ def pearson_r(df):
     rdf.set_index('fields', inplace=True)
 
     return rdf
-
 
 def spearman_r(df):
     """
@@ -380,7 +371,7 @@ def spearman_r(df):
 
 def ext_ols(data, y, x):
     """
-    회귀분석을 수해한다.
+    회귀분석을 수행한다.
 
     Parameters
     -------
@@ -500,7 +491,6 @@ def ext_ols(data, y, x):
     return (model, fit, summary, table, result, goodness, varstr)
 
 
-
 class OlsResult:
     def __init__(self):
         self._model = None
@@ -603,7 +593,7 @@ def my_ols(data, y, x):
 
     return ols_result
 
-def scalling(df, yname):
+def scalling(df, yname=None):
     """
     데이터 프레임을 표준화 한다.
 
@@ -617,15 +607,23 @@ def scalling(df, yname):
     - x_train_std_df: 표준화된 독립변수 데이터 프레임
     - y_train_std_df: 표준화된 종속변수 데이터 프레임
     """
-    x_train = df.drop([yname], axis=1)
+    # 평소에는 yname을 제거한 항목을 사용
+    # yname이 있지 않다면 df를 복사
+    x_train = df.drop([yname], axis=1) if yname else df.copy()
     x_train_std = StandardScaler().fit_transform(x_train)
     x_train_std_df = DataFrame(x_train_std, columns=x_train.columns)
     
-    y_train = df.filter([yname])
-    y_train_std = StandardScaler().fit_transform(y_train)
-    y_train_std_df = DataFrame(y_train_std, columns=y_train.columns)
+    if yname:
+        y_train = df.filter([yname])
+        y_train_std = StandardScaler().fit_transform(y_train)
+        y_train_std_df = DataFrame(y_train_std, columns=y_train.columns)
 
-    return (x_train_std_df, y_train_std_df)
+    if yname:
+        result = (x_train_std_df, y_train_std_df)
+    else:
+        result = x_train_std_df
+
+    return result
 
 def get_best_features(x_train_std_df):
     pca_model = pca()
@@ -636,3 +634,155 @@ def get_best_features(x_train_std_df):
     feature = list(set(list(best['feature'])))
     
     return (feature, topfeat_df)
+
+class LogitResult:
+    def __init__(self):
+        self._model = None    
+        self._fit = None
+        self._summary = None
+        self._prs = None
+        self._cmdf = None
+        self._result_df = None
+        self._odds_rate_df = None
+
+    @property
+    def model(self):
+        return self._model
+
+    @model.setter
+    def model(self, value):
+        self._model = value
+
+    @property
+    def fit(self):
+        return self._fit
+
+    @fit.setter
+    def fit(self, value):
+        self._fit = value
+
+    @property
+    def summary(self):
+        return self._summary
+
+    @summary.setter
+    def summary(self, value):
+        self._summary = value
+
+    @property
+    def prs(self):
+        return self._prs
+
+    @prs.setter
+    def prs(self, value):
+        self._prs = value
+
+    @property
+    def cmdf(self):
+        return self._cmdf
+
+    @cmdf.setter
+    def cmdf(self, value):
+        self._cmdf = value
+
+    @property
+    def result_df(self):
+        return self._result_df
+
+    @result_df.setter
+    def result_df(self, value):
+        self._result_df = value
+
+    @property
+    def odds_rate_df(self):
+        return self._odds_rate_df
+
+    @odds_rate_df.setter
+    def odds_rate_df(self, value):
+        self._odds_rate_df = value
+
+
+def my_logit(data, y, x):
+    """
+    로지스틱 회귀분석을 수행한다.
+
+    Parameters
+    -------
+    - data : 데이터 프레임
+    - y: 종속변수 이름
+    - x: 독립변수의 이름들(리스트)
+    """
+
+    # 데이터프레임 복사
+    df = data.copy()
+
+    # 독립변수의 이름이 리스트가 아니라면 리스트로 변환
+    if type(x) != list:
+        x = [x]
+
+    # 종속변수~독립변수1+독립변수2+독립변수3+... 형태의 식을 생성
+    expr = "%s~%s" % (y, "+".join(x))
+
+    # 회귀모델 생성
+    model = logit(expr, data=df)
+    # 분석 수행
+    fit = model.fit()
+
+    # 파이썬 분석결과를 변수에 저장한다.
+    summary = fit.summary()
+
+    # 의사결정계수
+    prs = fit.prsquared
+
+    # 예측결과를 데이터프레임에 추가
+    df['예측값'] = fit.predict(df.drop([y], axis=1))
+    df['예측결과'] = df['예측값'] > 0.5
+
+    # 혼동행렬
+    cm = confusion_matrix(df['합격여부'], df['예측결과'])
+    tn, fp, fn, tp = cm.ravel()
+    cmdf = DataFrame([[tn,tp],[fn,fp]], index = ['True', 'False'], columns = ['Negative', 'Positive'])
+
+    # RAS
+    ras = roc_auc_score(df['합격여부'], df['예측결과'])
+
+    # 위양성율, 재현율, 임계값(사용안함)
+    fpr, tpr, thresholds = roc_curve(df['합격여부'], df['예측결과'])
+
+    # 정확도
+    acc = accuracy_score(df['합격여부'], df['예측결과'])
+
+    # 정밀도
+    pre = precision_score(df['합격여부'], df['예측결과'])
+
+    # 재현율
+    recall = recall_score(df['합격여부'], df['예측결과'])
+
+    # F1 score
+    f1 = f1_score(df['합격여부'], df['예측결과'])
+
+    # 위양성율
+    fallout = fp / (fp + tn)
+
+    # 특이성
+    spe = 1 - fallout
+
+    result_df = DataFrame({'설명력(Pseudo-Rsqe)': [fit.prsquared], '정확도(Accuracy)':[acc], '정밀도(Precision)':[pre], '재현율(Recall, TPR)':[recall], '위양성율(Fallout, FPR)': [fallout], '특이성(Specificity, TNR)':[spe], 'RAS': [ras], 'f1_score':[f1]})
+
+    # 오즈비
+    coef = fit.params
+    odds_rate = np.exp(coef)
+    odds_rate_df = DataFrame(odds_rate, columns=['odds_rate'])
+    
+    #return (model, fit, summary, prs, cmdf, result_df, odds_rate_df)
+
+    logit_result = LogitResult()
+    logit_result.model = model
+    logit_result.fit = fit
+    logit_result.summary = summary
+    logit_result.prs = prs
+    logit_result.cmdf = cmdf
+    logit_result.result_df = result_df
+    logit_result.odds_rate_df = odds_rate_df
+
+    return logit_result
