@@ -1,5 +1,5 @@
 import numpy as np
-from pandas import DataFrame, MultiIndex, concat
+from pandas import DataFrame, MultiIndex, concat, DatetimeIndex
 from math import sqrt
 from scipy.stats import t, pearsonr, spearmanr
 from sklearn.impute import SimpleImputer
@@ -347,7 +347,7 @@ def allTest(*any, isPrint=True):
     -------
     - df: 검정 결과 데이터 프레임
     """
-    cc = concat([normalityTest(*any), equalVarianceTest(*any), independenceTest(*any)])
+    cc = concat([normalityTest(*any, isPrint=False), equalVarianceTest(*any, isPrint=False), independenceTest(*any, isPrint=False)])
 
     if isPrint:
         prettyPrint(cc)
@@ -752,7 +752,7 @@ class LogitResult:
     def odds_rate_df(self, value):
         self._odds_rate_df = value
 
-def myOls(data, y, x, subset=None):
+def myLogit(data, y, x, subset=None):
     """
     로지스틱 회귀분석을 수행한다.
 
@@ -933,3 +933,33 @@ def expTimeData(data, yname, sd_model="m", max_diff=1):
 
 def exp_time_data(data, yname, sd_model="m", max_diff=1):
     expTimeData(data, yname, sd_model, max_diff)
+    
+def set_datetime_index(df, field=None, inplace=False):
+    """
+        데이터 프레임의 인덱스를 datetime 형식으로 변환
+
+        Parameters
+        -------
+        - df: 데이터 프레임
+        - inplace: 원본 데이터 프레임에 적용 여부
+
+        Returns
+        -------
+        - 인덱스가 datetime 형식으로 변환된 데이터 프레임
+    """
+    
+    if inplace:
+        if field is not None:
+            df.set_index(field, inplace=True)
+            
+        df.index = DatetimeIndex(df.index.values, freq=df.index.inferred_freq)
+        df.sort_index(inplace=True)
+    else:
+        cdf = df.copy()
+        
+        if field is not None:
+            cdf.set_index(field, inplace=True)
+            
+        cdf.index = DatetimeIndex(cdf.index.values, freq=cdf.index.inferred_freq)
+        cdf.sort_index(inplace=True)
+        return cdf
